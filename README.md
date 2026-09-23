@@ -91,6 +91,8 @@ python tools\ec_probe.py read 0x07b9   # 0xbc = bit7 REACHED 置位
 python tools\ec_probe.py read 0x0742   # bit2=1 = 门控开
 ```
 
+实测完整记录（Windows 电池报告时间戳 + 实时测量）：[docs/verification-log.md](docs/verification-log.md)
+
 ## 工具一览
 
 | 文件 | 作用 |

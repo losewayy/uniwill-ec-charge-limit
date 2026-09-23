@@ -165,7 +165,7 @@ t+5s : 770=04 7B9=bc(bit7=1) 742=26(bit2=1)   ← 门控打开，REACHED 置位
 
 ### 端到端验证
 
-电池放电至 55% → 插电 → `BatteryStatus.Charging=True, ChargeRate≈29W` → 容量爬升 → 在 **48,048 mWh（精确 60.0%）停止**：`Charging=False, ChargeRate=0`，`0x07B9 bit7`（REACHED）置位。
+电池放电至 55% → 插电 → `BatteryStatus.Charging=True, ChargeRate≈29W` → 容量爬升 → 在 **48,048 mWh（精确 60.0%）停止**：`Charging=False, ChargeRate=0`，`0x07B9 bit7`（REACHED）置位。带时间戳的完整记录见 [verification-log.md](verification-log.md)。
 
 ### 实现
 
