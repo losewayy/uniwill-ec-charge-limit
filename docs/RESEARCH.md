@@ -144,13 +144,13 @@ store_limit();      // live → stored (xram[0x087F])
 
 重要细节：这套固件里 `0x087F` 有效本身就能打开限充（`!limit_enabled` 分支里只要 stored_limit 合法就会 fallthrough 到 `enable_control()`）——这是方案 B 的理论基础。
 
-## 4. 修复方案 A：平台覆盖槽（已实机验证）
+## 4. 修复方案 A：ROMID[0] 钉扎（已实机验证）
 
 ### 原理
 
-`state_is()` 检查两个寄存器：`0x07C3`（真实平台 ID，本机=7）和 `0x0770`（**覆盖槽**，出厂 `0xFF`）。后者就在可写窗口 `0x700-0x7FF` 内——不需要碰隐藏地址。
+`state_is()` 检查两个寄存器：`0x07C3`（真实平台 ID，本机=7）和 `0x0770`——后者即 Linux 驱动中的 `EC_ADDR_ROMID_START`，**14 字节 ROM ID 区的首字节**（Uniwill 的产品线标识）。本机 ROMID 完整读出为 `FF FF 01 FF FF...`（首字节未编程），TUXEDO 设备为 `0C xx 01 ...`。门控的真实语义是"只对 ROMID[0] 或平台值为 4/5 的产品线开放限充"。
 
-写 `xram[0x0770] = 0x04` → `state_is(4)` 成立 → 控制循环开始执行。
+写 `xram[0x0770] = 0x04` → `state_is(4)` 成立 → 控制循环开始执行。注意内核/tuxedo 驱动写 ROMID 有正式握手（`0x077E=0xA5`、`0x077F=0x78` 解锁后逐字节写入）；本机固件上直接写 `0x0770` 即生效，说明该地址无额外写保护。
 
 ### 实测时序
 
@@ -196,8 +196,8 @@ t+5s : 770=04 7B9=bc(bit7=1) 742=26(bit2=1)   ← 门控打开，REACHED 置位
 | 0x0741 | 0x81 | AP_OEM / manual mode 标志 |
 | 0x0742 | 0x22/0x26 | SUPPORT_5；**bit2 = 限充门控状态** |
 | 0x0765/0x0766 | 0xA1/0x94 | SUPPORT_1/2 |
-| 0x0770 | 0xFF→**0x04** | **平台覆盖槽（本次修复写入点）** |
-| 0x077E/0x077F | 0x55/0xAA | 疑似持久化提交握手（源自其他机型固件分析，本机未验证） |
+| 0x0770 | 0xFF→**0x04** | **ROMID[0]**（`EC_ADDR_ROMID_START`，14 字节 ROM ID 区 0x0770–0x077D 首字节；本机出厂 0xFF 未编程，本次修复写入点） |
+| 0x077E/0x077F | 0x55/0xAA | ROMID 写入握手字节（`ROMID_SPECIAL_1/2`；tuxedo 驱动写 ROMID 前写 0xA5/0x78 解锁） |
 | 0x07A6 | 0x21 | 充电档位 bits[5:4]（0=长效 1=均衡 2=工作站） |
 | 0x07B9 | 0x3C/0xBC | **Live limit** bits[6:0]；**bit7 = REACHED** |
 | 0x07BA | 0x00 | 语义未确认；本次用作无害的 mailbox 写探针（写入未生效，无影响） |

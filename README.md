@@ -33,17 +33,21 @@ enable_control();  // 使用 live limit xram[0x07B9]
 store_limit();
 ```
 
-本机 `0x07C3=7`、`0x0770=0xFF` → `limit_enabled` 恒为假；`0x087F`（存储上限）又位于主机不可写的 H2RAM 盲区（`0x800-0xBFF`），读出恒为 `0xFF` → 永远 `disable_control()`，写 `0x07B9` 毫无效果。
+`0x0770` 即 Linux 驱动中的 **`EC_ADDR_ROMID_START`**：14 字节 ROM ID 区（`0x0770–0x077D`）的首字节，Uniwill 用 ROMID 区分产品线。固件只对 ROMID[0] 或平台值为 4/5 的产品开放充电限制——这是一条**产品线授权门**。
+
+本机 `0x07C3=7`、ROMID[0]=`0xFF`（未编程）→ `limit_enabled` 恒为假；`0x087F`（存储上限）又位于主机不可写的 H2RAM 盲区（`0x800-0xBFF`），读出恒为 `0xFF` → 永远 `disable_control()`，写 `0x07B9` 毫无效果。
 
 ## 修复方案
 
-### 方案 A：平台覆盖槽钉扎（推荐，已实机验证，免管理员）
+### 方案 A：ROMID[0] 钉扎（推荐，已实机验证，免管理员）
 
-写 `xram[0x0770] = 0x04`——这是 EC 固件里专门的平台覆盖槽（出厂为空 `0xFF`），写入后门控条件成立，控制循环立刻开始执行限充。
+写 `xram[0x0770] = 0x04`——即 ROM ID 首字节。本机出厂为 `0xFF`（未编程的空槽），写入后门控条件成立，控制循环立刻开始执行限充。
 
 - ✅ 只写一个可写寄存器，不改固件、不碰隐藏地址、无需管理员
 - ✅ 已验证：门控 5 秒内打开（`0x0742` bit2、`0x07B9` bit7 置位），55% → 充到精确 **60.0%**（48,048/80,080 mWh）自动停充
-- ⚠️ 副作用面：平台值会影响 EC 内所有 `state_is()` 分支（理论上也包括功耗/温控表），实测温度、风扇、性能均正常；**可随时 `pin_limit.py --off` 撤销**
+- ⚠️ **适用前提：ROMID[0] 必须为 `0xFF` 空值**（先 `python tools\ec_probe.py read 0x0770` 确认）。若你的机器 ROMID 已编程（如 TUXEDO 设备为 `0x0C`），写入会**改变设备产品线识别**，可能导致其他 SKU 检测逻辑错乱——请勿使用本方案
+- ⚠️ 副作用面：ROMID/平台值会影响 EC 内所有 `state_is()` 分支（理论上也包括功耗/温控表），实测温度、风扇、性能均正常；**可随时 `pin_limit.py --off` 撤销**
+- ⚠️ 老机型特别警告：Linux 驱动文档记载部分 ~2020 机型上充电限制可能**永久损坏电池**——本工具仅建议用于确认出厂带充电限制选项、但固件未执行的新型设备
 - ⚠️ 易失：EC 复位/重启后丢，需要启动时重放（已提供 watcher + 开机自启方式）
 
 ```powershell
@@ -131,7 +135,7 @@ MIT — 见 [LICENSE](LICENSE)。
 
 On Uniwill/Tongfang-ODM laptops (MECHREVO, XMG, TUXEDO, Eluktronics families), setting a battery charge limit writes `xram[0x07B9]` but the EC firmware never enforces it. Root cause (from w568w's EC firmware RE): the 1-second charge-control loop is gated by `state_is(4) || state_is(5)`, i.e. `xram[0x07C3]`/`xram[0x0770]`; machines shipping a different platform value skip the loop entirely, and the fallback `stored_limit` check reads `xram[0x087F]` — which lives above the host-writable H2RAM window (`>0x07FF` is a dead zone).
 
-**Fix A (verified, no admin):** write `xram[0x0770] = 4` via `\\.\ACPIDriver` IOCTL — the dedicated platform-override slot. Gate opens within seconds; charge stops exactly at the configured limit (verified: 48,048/80,080 mWh = 60.0%). Volatile → replayed at logon by a tiny watcher.
+**Fix A (verified, no admin):** write `xram[0x0770] = 4` via `\\.\ACPIDriver` IOCTL — i.e. ROMID byte 0 (`EC_ADDR_ROMID_START`), which was unprogrammed (0xFF) on the test unit. Gate opens within seconds; charge stops exactly at the configured limit (verified: 48,048/80,080 mWh = 60.0%). Volatile → replayed at logon by a tiny watcher. Do NOT use on machines whose ROMID is already programmed.
 
 **Fix B (needs admin, cleaner if it works):** write `xram[0x087F] = limit` through the firmware's own WMI EC mailbox (`AcpiTest_MULong.GetSetULong`). If the stored limit is valid and persists, no platform override is needed at all.
 

@@ -2,10 +2,14 @@ r"""Pin the EC charge-limit gate open so the configured limit is enforced.
 
 The EC firmware only runs the charge-limit control loop when
     xram[0x07C3] == 4/5  OR  xram[0x0770] == 4/5   (state_is()).
-Machines reporting a different platform value skip the loop -> 0x07B9 ignored.
+xram[0x0770] is ROMID byte 0 (EC_ADDR_ROMID_START in the Linux driver) -
+the product-line identifier the gate checks. Machines shipping with
+ROMID[0] = 0xFF (unprogrammed) and platform != 4/5 skip the loop
+entirely -> 0x07B9 is ignored.
 
-Fix used here: write 0x0770 = 0x04 (the dedicated override slot, normally 0xFF).
-The control loop then enforces the live limit in xram[0x07B9].
+Fix used here: write 0x0770 = 0x04. Only safe when ROMID[0] was 0xFF -
+on machines with a programmed ROMID this byte is their product identity,
+do NOT overwrite it. The control loop then enforces xram[0x07B9].
 
 Both registers live in the writable H2RAM window (0x700-0x7FF), plain
 IOCTL_EC_WRITE via \\.\ACPIDriver -- no admin, no ports, no mailbox.
@@ -17,7 +21,7 @@ IOCTL_EC_WRITE via \\.\ACPIDriver -- no admin, no ports, no mailbox.
   python pin_limit.py --status         # read-only status, writes nothing
   python pin_limit.py --off            # restore 0x0770=0xFF (disable)
 
-Verified on MECHREVO JIAOLONG 16 Pro 2025 (EC 1.32). The override slot may
+Verified on MECHREVO JIAOLONG 16 Pro 2025 (EC 1.32). The ROMID value may
 feed other firmware branches - watch temps/fans on first use; --off reverts.
 """
 import ctypes
@@ -26,7 +30,7 @@ import time
 
 from ec_probe import open_driver, ec_read, ec_write
 
-REG_OVERRIDE = 0x0770   # platform override slot (0xFF = empty)
+REG_OVERRIDE = 0x0770   # ROMID[0] (0xFF = unprogrammed on the reference machine)
 REG_LIVE_LIMIT = 0x07B9  # live charge limit, bits[6:0]
 REG_GATE = 0x0742        # bit2 = gate open indicator (observability only)
 
@@ -57,7 +61,14 @@ def parse_args(argv):
 
 
 def pin(h, limit):
-    if ec_read(h, REG_OVERRIDE) != OVERRIDE_VAL:
+    cur = ec_read(h, REG_OVERRIDE)
+    if cur != OVERRIDE_VAL:
+        if cur != 0xFF:
+            raise SystemExit(
+                f"REFUSING to write: ROMID[0] is {cur:#04x}, not 0xFF. "
+                "This machine has a programmed ROM ID - overwriting byte 0 "
+                "would change its product-line identity. Aborting."
+            )
         ec_write(h, REG_OVERRIDE, OVERRIDE_VAL)
     if ec_read(h, REG_LIVE_LIMIT) & 0x7F != limit:
         ec_write(h, REG_LIVE_LIMIT, limit)

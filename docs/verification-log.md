@@ -39,7 +39,7 @@ START TIME            | STATE            | SOURCE   | CAPACITY REMAINING
 
 | 地址 | 值 | 解读 |
 |---|---|---|
-| `0x0770` | `0x04` | 平台覆盖槽保持钉扎 |
+| `0x0770` | `0x04` | ROMID[0] 保持钉扎 |
 | `0x07B9` | `0xBC` | live limit=60，**bit7 REACHED 置位**——EC 主动判定"已达上限" |
 | `0x0742` | `0x26` | bit2=1，门控/控制环路处于激活状态 |
 
