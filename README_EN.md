@@ -123,7 +123,12 @@ Dependencies: Python 3 stdlib only + an installed `UWACPIDriver.sys` (installed 
 - [cyear/NUCtool](https://github.com/cyear/NUCtool) — source of the `UWACPIDriver` IOCTL protocol
 - [faintonce/open-revo](https://github.com/faintonce/open-revo) — open-source console whose installed driver provides the no-admin EC channel
 
-Full reverse-engineering notes (decoded IOCTL dispatch table, H2RAM window model, DSDT/WMI protocol, dead ends) in [docs/RESEARCH.md](docs/RESEARCH.md) (中文; English translation: [docs/RESEARCH_EN.md](docs/RESEARCH_EN.md)).
+Full reverse-engineering notes (decoded IOCTL dispatch table, H2RAM window model, DSDT/WMI protocol, dead ends) in [docs/RESEARCH_EN.md](docs/RESEARCH_EN.md) (中文原文：[docs/RESEARCH.md](docs/RESEARCH.md)).
+
+## Related discussions
+
+- OpenRevo issue: https://github.com/faintonce/open-revo/issues/38
+- tuxedo-drivers issue (GitLab): https://gitlab.com/tuxedocomputers/development/packages/tuxedo-drivers/-/work_items/392
 
 ## License
 

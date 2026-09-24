@@ -125,6 +125,11 @@ python tools\ec_probe.py read 0x0742   # bit2=1 = 门控开
 
 完整逆向过程（IOCTL dispatch 全表、H2RAM 窗口模型、DSDT/WMI 协议、走过的死路）见 [docs/RESEARCH.md](docs/RESEARCH.md)。
 
+## 相关讨论
+
+- OpenRevo issue：https://github.com/faintonce/open-revo/issues/38
+- tuxedo-drivers issue（GitLab）：https://gitlab.com/tuxedocomputers/development/packages/tuxedo-drivers/-/work_items/392
+
 ## License
 
 MIT — 见 [LICENSE](LICENSE)。
