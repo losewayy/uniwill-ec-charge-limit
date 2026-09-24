@@ -5,7 +5,7 @@
 实测机型：机械革命蛟龙 16 Pro 2025（JIAOLONG，8945HX + RTX 5070 Ti，BIOS `N.1.21MRO34`，EC `1.32`）。
 原理上适用于所有使用 Uniwill EC + `UWACPIDriver.sys` / WMI `AcpiTest_MULong` 接口的机型（机械革命、XMG、TUXEDO、Eluktronics 等同模具家族），但**不同机型的 EC 固件行为可能不同，请先只读验证**。
 
-> English summary at the bottom / 英文摘要见文末。
+> English version: [README_EN.md](README_EN.md) · English research notes: [docs/RESEARCH_EN.md](docs/RESEARCH_EN.md)
 
 ---
 
@@ -131,12 +131,4 @@ MIT — 见 [LICENSE](LICENSE)。
 
 ---
 
-## English abstract
-
-On Uniwill/Tongfang-ODM laptops (MECHREVO, XMG, TUXEDO, Eluktronics families), setting a battery charge limit writes `xram[0x07B9]` but the EC firmware never enforces it. Root cause (from w568w's EC firmware RE): the 1-second charge-control loop is gated by `state_is(4) || state_is(5)`, i.e. `xram[0x07C3]`/`xram[0x0770]`; machines shipping a different platform value skip the loop entirely, and the fallback `stored_limit` check reads `xram[0x087F]` — which lives above the host-writable H2RAM window (`>0x07FF` is a dead zone).
-
-**Fix A (verified, no admin):** write `xram[0x0770] = 4` via `\\.\ACPIDriver` IOCTL — i.e. ROMID byte 0 (`EC_ADDR_ROMID_START`), which was unprogrammed (0xFF) on the test unit. Gate opens within seconds; charge stops exactly at the configured limit (verified: 48,048/80,080 mWh = 60.0%). Volatile → replayed at logon by a tiny watcher. Do NOT use on machines whose ROMID is already programmed.
-
-**Fix B (needs admin, cleaner if it works):** write `xram[0x087F] = limit` through the firmware's own WMI EC mailbox (`AcpiTest_MULong.GetSetULong`). If the stored limit is valid and persists, no platform override is needed at all.
-
-Full reverse-engineering notes (decoded IOCTL dispatch table, H2RAM window model, WMI/mailbox protocol, dead ends) in [docs/RESEARCH.md](docs/RESEARCH.md).
+Full English documentation: [README_EN.md](README_EN.md) · [docs/RESEARCH_EN.md](docs/RESEARCH_EN.md)
