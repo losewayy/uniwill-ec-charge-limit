@@ -125,6 +125,10 @@ python tools\ec_probe.py read 0x0742   # bit2=1 = 门控开
 
 完整逆向过程（IOCTL dispatch 全表、H2RAM 窗口模型、DSDT/WMI 协议、走过的死路）见 [docs/RESEARCH.md](docs/RESEARCH.md)。
 
+## 给软件开发者
+
+想把检测/修复做进控制台类软件（OpenRevo 等）：[docs/INTEGRATION.md](docs/INTEGRATION.md) —— 含检测决策流程、三条路径、硬性安全规则。
+
 ## 相关讨论
 
 - OpenRevo issue：https://github.com/faintonce/open-revo/issues/38
