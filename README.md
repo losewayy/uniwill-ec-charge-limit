@@ -7,6 +7,8 @@
 
 > English version: [README_EN.md](README_EN.md) · English research notes: [docs/RESEARCH_EN.md](docs/RESEARCH_EN.md)
 
+![ec_probe 实测输出：EC 寄存器只读转储，0x07b9 的 bit7=reached 标志清晰可见](docs/probe-terminal.png)
+
 ---
 
 ## 症状
