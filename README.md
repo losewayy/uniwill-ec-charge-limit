@@ -5,6 +5,8 @@
 实测机型：机械革命蛟龙 16 Pro 2025（JIAOLONG，8945HX + RTX 5070 Ti，BIOS `N.1.21MRO34`，EC `1.32`）。
 原理上适用于所有使用 Uniwill EC + `UWACPIDriver.sys` / WMI `AcpiTest_MULong` 接口的机型（机械革命、XMG、TUXEDO、Eluktronics 等同模具家族），但**不同机型的 EC 固件行为可能不同，请先只读验证**。
 
+> ⚠️ **本项目是逆向分析记录，不是开箱即用的限电工具。** 门控字节是产品身份的一部分，写错可能带来键盘映射等副作用；~2020 代老机型上启用限充**可能永久损坏电池**（CVE-2026-64143）。详见[免责说明](#-关于这不是一个立即可用的限电方案)。
+
 > English version: [README_EN.md](README_EN.md) · English research notes: [docs/RESEARCH_EN.md](docs/RESEARCH_EN.md)
 
 ![ec_probe 实测输出：EC 寄存器只读转储，0x07b9 的 bit7=reached 标志清晰可见](docs/probe-terminal.png)
@@ -41,32 +43,53 @@ store_limit();
 
 ## 修复方案
 
-### 方案 A：ROMID[0] 钉扎（推荐，已实机验证，免管理员）
+### 方案 A：门控字节钉扎（免管理员，本机已验证）
 
-写 `xram[0x0770] = 0x04`——即 ROM ID 首字节。本机出厂为 `0xFF`（未编程的空槽），写入后门控条件成立，控制循环立刻开始执行限充。
+门控条件是 OR——**`0x07C3` 或 `0x0770` 满足其一即可开门**。
 
-- ✅ 只写一个可写寄存器，不改固件、不碰隐藏地址、无需管理员
-- ✅ 已验证：门控 5 秒内打开（`0x0742` bit2、`0x07B9` bit7 置位），55% → 充到精确 **60.0%**（48,048/80,080 mWh）自动停充
-- ⚠️ **适用前提：ROMID[0] 必须为 `0xFF` 空值**（先 `python tools\ec_probe.py read 0x0770` 确认）。若你的机器 ROMID 已编程（如 TUXEDO 设备为 `0x0C`），写入会**改变设备产品线识别**，可能导致其他 SKU 检测逻辑错乱——请勿使用本方案
-- ⚠️ 副作用面：ROMID/平台值会影响 EC 内所有 `state_is()` 分支（理论上也包括功耗/温控表），实测温度、风扇、性能均正常；**可随时 `pin_limit.py --off` 撤销**
-- ⚠️ 老机型特别警告：Linux 驱动文档记载部分 ~2020 机型上充电限制可能**永久损坏电池**——本工具仅建议用于确认出厂带充电限制选项、但固件未执行的新型设备
-- ⚠️ 易失：EC 复位/重启后丢，需要启动时重放（已提供 watcher + 开机自启方式）
+#### A1：platform 字节 `0x07C3`
+
+写 `xram[0x07C3] = 0x04`。不动产品线身份字节——蛟龙16Pro 2025（EC 1.32）上实测：**门开 + 温度/风扇/Fn 键全正常**。
+
+- ✅ 不碰 ROMID（产品身份证），本机实测无副作用
+- ⚠️ **本机固件上只认 `4`，不认 `5`**（写 5 能写进字节但门不开）——不同固件 build 的常数可能不同
+- ⚠️ 易失：EC 复位/重启后丢，需要 `--watch` 或开机自启重放；原始值自动存 `pin_limit_state.json`，`--off` 可还原
+
+#### A2：ROMID[0] `0x0770` 钉扎（仅限空槽）
+
+写 `xram[0x0770] = 0x04`。**仅限 ROMID[0] 出厂为 `0xFF` 空槽的机器**（脚本会自动拒绝写已编程 ROMID）。
+
+- ✅ 蛟龙16Pro（ROMID=`0xFF`）上验证可用
+- ⚠️ **已知副作用**：游戏本上写 `4`（轻薄本产品线值）可能触发 Fn/键盘映射错乱——写 `5`（游戏本产品线值）在部分机型上正常。**ROMID 是产品身份证，写错值会让 EC 走错产品表分支**
+- ❌ ROMID 已编程的机器**不要碰这条路**
+
+#### 老机型警告（重要）
+
+Linux 内核 **CVE-2026-64143** 明确记载：部分 ~2020 代 Uniwill 机型上启用充电限制会**永久性损坏电池**——上游因此直接封死了 `force` 强开路径。OEM 把门"关着"可能不只是产品区分，**可能是安全边界**。老机型请勿使用本工具。
 
 ```powershell
-# 只读状态查询（不写任何寄存器）
-python tools\pin_limit.py --status
+# 体检（只读，不写任何 xram）——先跑这个
+pin_limit.exe --dump            # 或 python tools\pin_limit.py --dump
 
-# 一次性钉扎（默认上限 60%，--limit 可改）
-python tools\pin_limit.py --limit 60
+# 看门现在开没开
+pin_limit.exe --status
 
-# 后台常驻（每 10 秒重新断言，防其他软件重置）
-pythonw tools\pin_limit.py --watch 10
+# 首选：platform 字节钉扎（戳 0x07C3=4，限值默认 60%）
+pin_limit.exe --key platform --val 4 --limit 60
 
-# 撤销
-python tools\pin_limit.py --off
+# 备选：ROMID 钉扎（仅当 0x0770 是 0xFF）
+pin_limit.exe --key romid --val 4
+
+# 后台常驻（每 10 秒重新断言，防 EC 复位弹回）
+pin_limit.exe --key platform --val 4 --limit 60 --watch 10
+
+# 撤销（按 pin_limit_state.json 里的记录还原；或直接重启）
+pin_limit.exe --off
 ```
 
-开机自启：运行 `tools\install_startup.bat` 会在当前用户的启动文件夹生成一个 launcher（不需要管理员）。删除该文件即取消自启。
+`pin_limit.exe` 是免 Python 的预打包二进制（PyInstaller）；也可用 `python tools\pin_limit.py` 跑源码版。**裸跑不带参数 = 只读 dump**，双击安全。
+
+开机自启：`tools\install_startup.bat` 会在当前用户启动文件夹生成一个 launcher（不需要管理员）。
 
 ### 方案 B：写存储上限 `0x087F`（更"正式"，需要管理员，本机未验证）
 
@@ -81,6 +104,17 @@ python tools\pin_limit.py --off
 - 若写入后读回验证通过 → 存储上限有效，可以撤掉方案 A 的覆盖（`pin_limit.py --off`），门控由存储值维持打开，**零副作用**
 - 若写入不落或固件不持久化（xram 断电即失），则退回方案 A
 - 两个未知数：mailbox 后端是否在本机固件实现；写入是否被固件同步进 flash（w568w 的机器会持久化，本机未验证）
+
+## ⚠️ 关于"这不是一个立即可用的限电方案"
+
+**请把本项目当作逆向分析报告，而非可直接投入使用的工具。**
+
+- 本仓库**仅在蛟龙16Pro 2025（EC 1.32 / N.1.21MRO34）上实机验证**——其他机型 EC 固件是独立 build，门控常数、副作用、甚至有效性都**不能保证通用**
+- 门控里 `4`/`5` 是**产品线枚举**（4=轻薄本线、5=游戏本线），写错值等于让 EC "以为自己是别的产品"——键盘映射、功耗表、风扇策略都可能走错分支。这不是"调个参数"，是"换一个身份"
+- tuxedo-drivers maintainer Werner Sembach 在 [issue #392](https://gitlab.com/tuxedocomputers/development/packages/tuxedo-drivers/-/work_items/392) 里的答复原话："ROMID is a magic value set by the OEM and manipulating it will open untested codepaths. I can't tell you if it has negative effects or not."——上游明确不会碰这条路
+- **老机型（~2020 代）绝对不要用**：Linux 内核 CVE-2026-64143 记载这些机型上启用充电限制会**永久损坏电池**——上游宁可封死 `force` 强开也不放行。你机器是哪一年代的，决定了"能不能玩"这道题的第一道关
+
+如果你只是想给笔记本限电，**最安全的路是等待厂商更新 BIOS/EC 或使用官方控制台**；如果你是想研究 EC 逆向，这个项目提供的是分析方法和工具，不是"安装即用"的解决方案。
 
 ## 验证方法
 
@@ -104,7 +138,7 @@ python tools\ec_probe.py read 0x0742   # bit2=1 = 门控开
 | 文件 | 作用 |
 |---|---|
 | `tools/ec_probe.py` | EC xram 读写探针（`read 0xADDR` / 全量 dump），免管理员 |
-| `tools/pin_limit.py` | 方案 A 实现：`--watch N` 常驻 / `--off` 撤销 |
+| `tools/pin_limit.py` | 方案 A 实现：自包含单文件，双钥匙可选（`--key platform|romid`）、`--dump` 只读体检、`--watch N` 常驻、`--off` 按状态文件还原；裸跑 = 安全只读 dump |
 | `tools/wmi_stored_limit.ps1` | 方案 B 实现：WMI mailbox 读写 `0x087F`（需管理员） |
 | `tools/mailbox.py` | 端口 0x62/0x66 手工 mailbox 协议的参考实现（本机实测固件不应答，留存供其他机型尝试） |
 | `tools/install_startup.bat` | 把 watcher 装进当前用户启动文件夹 |

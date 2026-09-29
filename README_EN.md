@@ -5,6 +5,8 @@ Fix for the "charge limit is set but never enforced" EC firmware issue on Uniwil
 Tested on: MECHREVO JIAOLONG 16 Pro 2025 (8945HX + RTX 5070 Ti, BIOS `N.1.21MRO34`, EC `1.32`).
 In principle applies to any Uniwill-EC machine using `UWACPIDriver.sys` / the `AcpiTest_MULong` WMI interface (MECHREVO, XMG, TUXEDO, Eluktronics and other Tongfang-family devices) — **but EC behavior varies per model/firmware; run read-only probes first**.
 
+> ⚠️ **This is a reverse-engineering write-up, not a turnkey fix.** The gate bytes are part of product identity; a wrong poke can break keyboard mappings and more. On ~2020-era models, enabling the charge limit can **permanently damage the battery** (CVE-2026-64143). See [the disclaimer](#-this-is-a-research-write-up-not-a-ready-to-use-solution).
+
 > 中文文档：[README.md](README.md)
 
 ---
@@ -39,30 +41,51 @@ On this unit `0x07C3=7` and ROMID[0]=`0xFF` (unprogrammed) → `limit_enabled` i
 
 ## Fixes
 
-### Method A: ROMID[0] pin (recommended, verified on real hardware, no admin)
+### Method A: gate-operand pin (no admin, verified on this unit)
 
-Write `xram[0x0770] = 0x04` — the first ROM ID byte. It shipped as `0xFF` (unprogrammed) on this unit; writing it satisfies the gate and the control loop immediately starts enforcing the limit.
+The gate is an OR — **either `0x07C3` or `0x0770` satisfying it opens the door**.
 
-- ✅ One writable register; no firmware changes, no hidden addresses, no admin needed
-- ✅ Verified: gate opens within ~5 s (`0x0742` bit2, `0x07B9` bit7 set); 55% → stops at exactly **60.0%** (48,048/80,080 mWh)
-- ⚠️ **Prerequisite: ROMID[0] must be `0xFF`** (check with `python tools\ec_probe.py read 0x0770` first). On machines with a programmed ROMID (e.g. `0x0C` on TUXEDO devices) writing it **changes product-line identification** and may confuse SKU detection — do NOT use this method there
-- ⚠️ Side-effect surface: ROMID/platform values feed all `state_is()` branches (in theory including power/thermal tables); temps, fans and performance measured normal; **always reversible via `pin_limit.py --off`**
-- ⚠️ Old-model warning: the Linux driver docs note that on some ~2020 models the charge-limit interface can **permanently damage the battery** — this tool is only recommended for newer devices that shipped with a charge-limit option whose firmware fails to execute it
-- ⚠️ Volatile: lost on EC reset/reboot; replayed at logon (watcher + startup launcher included)
+#### A1: platform byte `0x07C3`
+
+Write `xram[0x07C3] = 0x04`. Leaves the product-identity byte untouched — verified on JIAOLONG 16 Pro 2025 (EC 1.32): **gate opens, temps/fans/Fn keys all normal**.
+
+- ✅ Does not touch ROMID; zero side effects observed on this unit
+- ⚠️ **On this firmware the byte accepts `4` only** — `5` writes but does not open the gate; constants differ per firmware build
+- ⚠️ Volatile: lost on EC reset/reboot, needs `--watch` or autostart replay; original value is auto-saved to `pin_limit_state.json`, restored by `--off`
+
+#### A2: ROMID[0] `0x0770` pin (empty-slot machines only)
+
+Write `xram[0x0770] = 0x04`. **Only when ROMID[0] shipped as `0xFF`** (the script refuses to overwrite a programmed ROMID).
+
+- ✅ Verified on this unit (ROMID=`0xFF`)
+- ⚠️ **Known side effect**: on gaming models, writing `4` (thin-laptop product-line value) can break Fn/keyboard mappings — writing `5` (gaming product line) worked cleanly on some machines. **ROMID is a product-identity byte; a wrong value routes the EC into wrong product tables**
+- ❌ Do NOT touch this on machines with a programmed ROMID (e.g. `0x0C` on TUXEDO)
+
+#### Old-model warning (important)
+
+Linux kernel **CVE-2026-64143** documents that on some ~2020-era Uniwill models the charge-limit feature can **permanently damage the battery** — upstream blocked even the `force` module parameter for this reason. The closed gate may be a **safety boundary**, not just product segmentation. Do not use this on such machines.
 
 ```powershell
-# Read-only status (writes nothing)
-python tools\pin_limit.py --status
+# Read-only diagnostic (writes no xram) — run this first
+pin_limit.exe --dump            # or: python tools\pin_limit.py --dump
 
-# One-shot pin (default limit 60%; --limit to change)
-python tools\pin_limit.py --limit 60
+# Quick gate status
+pin_limit.exe --status
 
-# Resident watcher (re-asserts every 10 s, survives resets by other software)
-pythonw tools\pin_limit.py --watch 10
+# Preferred: platform-byte pin (pokes 0x07C3=4, default limit 60%)
+pin_limit.exe --key platform --val 4 --limit 60
 
-# Revert
-python tools\pin_limit.py --off
+# Alternative: ROMID pin (only if 0x0770 is 0xFF)
+pin_limit.exe --key romid --val 4
+
+# Resident watcher (re-asserts every 10 s, survives EC resets)
+pin_limit.exe --key platform --val 4 --limit 60 --watch 10
+
+# Revert (restores values recorded in pin_limit_state.json; a reboot works too)
+pin_limit.exe --off
 ```
+
+`pin_limit.exe` is a PyInstaller-packed single binary (no Python needed); the source runs as `python tools\pin_limit.py`. **Bare run = read-only dump** — safe to double-click.
 
 Autostart: `tools\install_startup.bat` creates a launcher in the current user's Startup folder (no admin needed). Delete that file to remove autostart.
 
@@ -79,6 +102,17 @@ Per the firmware pseudocode: even when the platform gate fails, a valid `xram[0x
 - If the write verifies → the stored limit is effective and Method A can be removed (`pin_limit.py --off`); the gate stays open via the stored value — **zero side effects**
 - If the write doesn't stick or isn't persisted by firmware (xram is volatile), fall back to Method A
 - Two unknowns: whether this EC implements the mailbox backend, and whether the value survives reboot (w568w's machine persists it; this unit unverified)
+
+## ⚠️ This is a research write-up, not a ready-to-use solution
+
+**Treat this repository as a reverse-engineering analysis, not a tool you should just install and run.**
+
+- Verified **only on JIAOLONG 16 Pro 2025 (EC 1.32 / N.1.21MRO34)** — other models run different EC firmware builds; gate constants, side effects, and even effectiveness **do not generalize**
+- `4`/`5` are **product-line enumerations** (4 = thin-laptop line, 5 = gaming line). A wrong value makes the EC "believe it is a different product" — keyboard mapping, power tables and fan curves can all take wrong branches. This is not "tuning a parameter"; it is "swapping an identity"
+- The tuxedo-drivers maintainer's reply on [issue #392](https://gitlab.com/tuxedocomputers/development/packages/tuxedo-drivers/-/work_items/392), verbatim: "ROMID is a magic value set by the OEM and manipulating it will open untested codepaths. I can't tell you if it has negative effects or not." — upstream explicitly declines this route
+- **~2020-era models: absolutely do not use.** Kernel CVE-2026-64143 documents that enabling the charge limit on those machines can **permanently damage the battery** — upstream sealed off even the `force` override. Your machine's generation is the first gate of whether this is safe at all
+
+If you simply want charge limiting, **the safest path is a vendor BIOS/EC update or the official console**. If you want to study EC internals, this project offers the analysis method and tooling — not a turnkey fix.
 
 ## How to verify
 
@@ -102,7 +136,7 @@ Full timestamped record (Windows battery report + live measurements): [docs/veri
 | File | Purpose |
 |---|---|
 | `tools/ec_probe.py` | EC xram read/write probe (`read 0xADDR` / full dump), no admin |
-| `tools/pin_limit.py` | Method A: `--watch N` resident / `--off` revert |
+| `tools/pin_limit.py` | Method A: self-contained single file; `--key platform|romid`, `--dump` read-only diag, `--watch N`, `--off` state-file restore; bare run = safe dump |
 | `tools/wmi_stored_limit.ps1` | Method B: WMI mailbox read/write of `0x087F` (admin) |
 | `tools/mailbox.py` | Reference implementation of the port-0x62/0x66 mailbox (firmware did not respond on this unit; kept for other models) |
 | `tools/install_startup.bat` | Installs the watcher into the user's Startup folder |

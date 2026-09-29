@@ -18,9 +18,12 @@ Writing `0x07B9` alone is not enough — the firmware checks a gate before ever 
    bit2 = 1  → 门控开着，功能原生生效，什么都不用做 ✅ DONE
    bit2 = 0  → 门控关着，继续 ↓
 3. 读 0x0770 (ROMID[0])
-   = 0xFF    → 未编程空槽，可安全写 0x04 开门 → 跳转"启用路径"
-   ≠ 0xFF    → ROMID 已编程（如 0x0C），禁止写入 → 跳转"存储值路径或放弃"
-4. 读 0x07C3 仅为诊断参考（真实平台 ID，不要写它）
+   = 0xFF    → 未编程空槽，优先试写 0x07C3=0x04（platform 字节，
+               不碰产品身份）→ 跳转"启用路径"
+   ≠ 0xFF    → ROMID 已编程（如 0x0C），禁止写入 → 仍可先试 0x07C3=0x04，
+               或直接走"存储值路径"
+4. 读 0x07C3 记原值 → 写 0x07C3=0x04 → 等 ~5s 读 0x0742 bit2 验证门开
+   （注：实测固件上 0x07C3 只认 4，写 5 不开门）
 ```
 
 ```
@@ -29,9 +32,12 @@ Writing `0x07B9` alone is not enough — the firmware checks a gate before ever 
    bit2 = 1  → gate already open, feature works natively, done ✅
    bit2 = 0  → gate closed, continue ↓
 3. Read 0x0770 (ROMID[0])
-   = 0xFF    → unprogrammed slot, safe to write 0x04 → "enable path"
-   ≠ 0xFF    → programmed ROMID (e.g. 0x0C), DO NOT write → "stored-limit path or give up"
-4. Read 0x07C3 for diagnostics only (real platform ID — never write it)
+   = 0xFF    → unprogrammed slot, prefer writing 0x07C3=0x04 (platform
+               byte — does not touch product identity) → "enable path"
+   ≠ 0xFF    → programmed ROMID (e.g. 0x0C), DO NOT write → still try
+               0x07C3=0x04, or go straight to the stored-limit path
+4. Read 0x07C3 to save original → write 0x07C3=0x04 → wait ~5 s, verify
+   0x0742 bit2 (on tested firmware 0x07C3 accepts 4 ONLY; 5 does nothing)
 ```
 
 ## 三条路径 / Three paths
@@ -75,8 +81,8 @@ WMI AcpiTest_MULong.GetSetULong：
 | 规则 | 原因 |
 |---|---|
 | `0x0770` 只在 == 0xFF 时写 | 已编程 ROMID 是产品身份，覆盖会破坏 SKU 检测 |
-| **不要写 `0x07C3`** | 那是真实平台 ID，改掉等于换身份，风险面远大于 ROMID[0] |
-| ~2020 前后老机型不提供此功能 | 内核文档明确警告：那些机器上限充接口可能**永久损坏电池**——门控可能是保护性的 |
+| `0x07C3` 优先写 `0x04`，写前留存原值 | 第二门控操作数，两台固件实测认 4 不认 5；不改产品身份，但仍可能喂产品线表（个别机型 Fn 轻度错乱），须逐键验证 |
+| ~2020 前后老机型不提供此功能 | 内核 CVE-2026-64143：那些机型上限充可**永久损坏电池**——门控可能是保护性的 |
 | 任何写前读原值并留存 | 回滚需要 |
 | 门控关闭 ≠ 接口坏了 | 是产品线授权——用户提示语别说"故障"，说"固件未对该产品线启用" |
 
@@ -98,7 +104,7 @@ CR1 的 MechrevoBatteryManager 就是卡在这：逻辑写了 `0x07B9`/`0x07D0` 
 | `0x077E/0x077F` | ROMID 写入握手（官方写序：0xA5/0x78 解锁；本机实测直接写也生效） |
 | `0x07A6` bits[5:4] | 充电档位：0=high_capacity 1=balanced 2=stationary |
 | `0x07B9` | live limit bits[6:0] + bit7=REACHED |
-| `0x07C3` | 平台值（只读诊断，勿写） |
+| `0x07C3` | platform 字节，第二门控操作数（优先用 4 试开，勿写其他值） |
 | `0x087F` | stored limit（H2RAM 盲区 0x800-0xBFF 内，只能经 mailbox） |
 
 更完整的协议/逆向细节：[RESEARCH.md](RESEARCH.md) / [RESEARCH_EN.md](RESEARCH_EN.md)
