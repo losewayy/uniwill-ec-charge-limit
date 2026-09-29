@@ -2,7 +2,7 @@
 
 设备：MECHREVO JIAOLONG 16 Pro 2025（BIOS `N.1.21MRO34`，EC `1.32`）
 电池：80,080 mWh 设计容量
-修复状态：`xram[0x0770]=0x04` 钉扎 + watcher 常驻（方案 A）
+修复状态：`xram[0x0770]=0x04` 钉扎 + watcher 常驻（方案 A；记录时使用的是 ROMID 钥匙，当前实现已改用 `0x07C3` platform 字节——同样开门、不碰产品身份）
 
 ## 数据来源
 

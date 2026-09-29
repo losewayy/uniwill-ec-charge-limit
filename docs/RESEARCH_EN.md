@@ -146,15 +146,15 @@ Plugging in this unit's measured values: `0x07C3=7`, `0x0770=0xFF` → `limit_en
 
 Important detail: in this firmware a valid `0x087F` alone suffices to enable limiting (in the `!limit_enabled` branch, a legal stored_limit falls through to `enable_control()`) — this is the theoretical basis of Method B.
 
-## 4. Fix A: ROMID[0] pin (verified on hardware)
+## 4. Fix A: gate-operand pin (verified on hardware)
 
 ### Principle
 
-`state_is()` checks two registers: `0x07C3` (real platform ID, =7 here) and `0x0770` — the latter being the Linux driver's `EC_ADDR_ROMID_START`, i.e. **the first byte of the 14-byte ROM ID region** (Uniwill's product-line identifier). This unit's full ROMID reads `FF FF 01 FF FF...` (first byte unprogrammed); TUXEDO devices read `0C xx 01 ...`. The gate's true semantics: "charge limiting is enabled only for product lines with ROMID[0] or platform value 4/5".
+`state_is()` checks two registers: `0x07C3` (platform byte, =7 here) and `0x0770` — the latter being the Linux driver's `EC_ADDR_ROMID_START`, i.e. **the first byte of the 14-byte ROM ID region** (Uniwill's product-line identifier). This unit's full ROMID reads `FF FF 01 FF FF...` (first byte unprogrammed); TUXEDO devices read `0C xx 01 ...`. The gate's true semantics: "charge limiting is enabled only for product lines with ROMID[0] or platform value 4/5" — an OR, so **poking either operand satisfies it**.
 
-Writing `xram[0x0770] = 0x04` → `state_is(4)` holds → the control loop runs. Note the kernel/tuxedo drivers write ROMID via a formal handshake (`0x077E=0xA5`, `0x077F=0x78` unlock, then byte-wise write); on this firmware a plain write to `0x0770` takes effect, so the address has no extra write protection.
+### Measured: both operands verified (this unit, EC 1.32)
 
-### Observed timing
+**Operand 1: `0x0770` (ROMID[0])**
 
 ```
 write 0x0770=0x04
@@ -163,7 +163,22 @@ t+5s : 770=04 7B9=bc(bit7=1) 742=26(bit2=1)   ← gate open, REACHED set
 temps/fans uneventful over 40 s
 ```
 
-Restoring `0x0770=0xFF` closes the gate within ~5 s → **this firmware does NOT write back `0x087F` while the gate is open** (unlike w568w's machine; on EC 1.32 the store_limit path isn't triggered or needs other conditions).
+Note the kernel/tuxedo drivers write ROMID via a formal handshake (`0x077E=0xA5`, `0x077F=0x78` unlock, then byte-wise write); on this firmware a plain write to `0x0770` takes effect, so the address has no extra write protection.
+
+**Operand 2: `0x07C3` (platform byte) — preferred**
+
+```
+restore 0x0770=0xFF (gate closes, 742=0x22 bit2=0)
+write 0x07C3=0x05 → 742 stays 0x22, gate still shut after >20 s  ← 5 rejected
+write 0x07C3=0x04 → t+2s 742=0x26(bit2=1), 7B9=bc               ← 4 accepted
+Fn keys verified one by one: all normal; ROMID untouched at 0xFF throughout
+```
+
+**Asymmetry finding**: on this firmware `0x07C3` accepts `4` but NOT `5` — the `{4,5}` constant set does not apply symmetrically to both operands; per-firmware builds may differ. Corollary: "writing 5 did nothing" on some machine does not prove the operand is dead — the constant may simply differ.
+
+Restoring `0x0770=0xFF` / the original `0x07C3` value closes the gate within ~5 s → **this firmware does NOT write back `0x087F` while the gate is open** (unlike w568w's machine; on EC 1.32 the store_limit path isn't triggered or needs other conditions).
+
+**Why `0x07C3` is preferred**: ROMID[0] is the product-line ID — writing it changes what the device "believes it is", and `state_is()` feeds more branches than this gate (product-line-dispatched tables can shift). The platform byte carries less identity weight (verified side-effect-free on this unit). The tool defaults to `--key platform`.
 
 ### End-to-end verification
 
@@ -171,7 +186,7 @@ Discharge to 55% → plug in → `BatteryStatus.Charging=True, ChargeRate≈29 W
 
 ### Implementation
 
-`pin_limit.py`: `--watch N` re-asserts `0x0770=4` + `0x07B9=<limit>` every N s; `--limit` changes the target (default 60); `--off` restores `0xFF`. Autostart via a Startup-folder launcher (no admin).
+`pin_limit.py` (self-contained single file): `--key platform|romid` selects the operand (default `platform`), `--val` the value (default 4), `--limit` the percentage (default 60), `--watch N` re-asserts every N s, `--dump` read-only diagnostic, `--status` quick check, `--off` restores from `pin_limit_state.json`. Bare run = read-only dump. Original values are saved before any write; writing `0x0770` is refused when it isn't `0xFF`. Autostart via a Startup-folder launcher (no admin).
 
 ## 5. Fix B: WMI mailbox write of `0x087F` (cleaner in theory, unverified)
 
@@ -198,12 +213,12 @@ Two unverified points (someone has to run it to find out):
 | 0x0741 | 0x81 | AP_OEM / manual-mode flag |
 | 0x0742 | 0x22/0x26 | SUPPORT_5; **bit2 = charge-limit gate state** |
 | 0x0765/0x0766 | 0xA1/0x94 | SUPPORT_1/2 |
-| 0x0770 | 0xFF→**0x04** | **ROMID[0]** (`EC_ADDR_ROMID_START`, first byte of the 14-byte ROM ID region 0x0770–0x077D; unprogrammed 0xFF on this unit, the write point of this fix) |
+| 0x0770 | 0xFF→**0x04** | **ROMID[0]** (`EC_ADDR_ROMID_START`, first byte of the 14-byte ROM ID region 0x0770–0x077D; unprogrammed 0xFF on this unit — one of the two gate operands) |
 | 0x077E/0x077F | 0x55/0xAA | ROMID write-handshake bytes (`ROMID_SPECIAL_1/2`; tuxedo writes 0xA5/0x78 to unlock before programming ROMID) |
 | 0x07A6 | 0x21 | charge-profile bits[5:4] (0=high capacity 1=balanced 2=stationary) |
 | 0x07B9 | 0x3C/0xBC | **live limit** bits[6:0]; **bit7 = REACHED** |
 | 0x07BA | 0x00 | semantics unconfirmed; used here as a harmless mailbox write probe (write had no effect) |
-| 0x07C3 | 0x07 | platform/state value (real platform ID=7) |
+| 0x07C3 | 0x07 | platform byte — second gate operand (this firmware accepts 4, not 5) |
 | 0x087F | 0xFF | **stored limit** — inside the H2RAM dead zone, reachable only via the mailbox |
 
 ## 7. Dead ends (don't retry these)
@@ -219,7 +234,8 @@ Two unverified points (someone has to run it to find out):
 
 ## 8. Risks & notes
 
-- **Platform-override side effects**: `0x0770=4` affects every `state_is()` branch (possibly including power/thermal tables). Temps, fans, performance measured normal, but not all firmware paths are enumerated; on any anomaly run `pin_limit.py --off` to revert instantly
+- **Operand-write side effects**: `state_is()` is referenced by more than the charge-limit gate (per w568w's RE, product-line checks drive multiple feature tables) — writing `0x0770`/`0x07C3` can affect every product-line-dispatched table. On this unit `0x07C3=4` showed no side effects and `0x0770=4` none either, but not all firmware paths are enumerated — verify each feature on first use; `--off` reverts instantly
+- **Old models are off-limits**: CVE-2026-64143 — on some ~2020-era Uniwill models enabling the charge limit can permanently damage the battery; upstream sealed even the `force` override. On those generations the closed gate may be protective design
 - **Volatility**: Method A lives in EC RAM and is lost on EC reset/reboot → depends on startup replay; that's a feature not a bug (leaves no trace, zero brick risk)
 - **Percentage precision**: Windows' displayed charge and the EC's internal SOC can differ by ±1–2%
 - **Read before write**: record original values before any write; don't write registers of unknown semantics
