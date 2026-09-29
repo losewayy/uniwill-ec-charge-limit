@@ -58,7 +58,7 @@ Write `xram[0x07C3] = 0x04`. Leaves the product-identity byte untouched — veri
 Write `xram[0x0770] = 0x04`. **Only when ROMID[0] shipped as `0xFF`** (the script refuses to overwrite a programmed ROMID).
 
 - ✅ Verified on this unit (ROMID=`0xFF`)
-- ⚠️ **Known side effect**: on gaming models, writing `4` (thin-laptop product-line value) can break Fn/keyboard mappings — writing `5` (gaming product line) worked cleanly on some machines. **ROMID is a product-identity byte; a wrong value routes the EC into wrong product tables**
+- ⚠️ **Side-effect surface**: `state_is()` is referenced by more than just the charge-limit gate — a wrong product-line value may affect other per-product-line features. **ROMID is a product-identity byte; a wrong value routes the EC into wrong product tables**
 - ❌ Do NOT touch this on machines with a programmed ROMID (e.g. `0x0C` on TUXEDO)
 
 #### Old-model warning (important)
@@ -108,7 +108,7 @@ Per the firmware pseudocode: even when the platform gate fails, a valid `xram[0x
 **Treat this repository as a reverse-engineering analysis, not a tool you should just install and run.**
 
 - Verified **only on JIAOLONG 16 Pro 2025 (EC 1.32 / N.1.21MRO34)** — other models run different EC firmware builds; gate constants, side effects, and even effectiveness **do not generalize**
-- `4`/`5` are **product-line enumerations** (4 = thin-laptop line, 5 = gaming line). A wrong value makes the EC "believe it is a different product" — keyboard mapping, power tables and fan curves can all take wrong branches. This is not "tuning a parameter"; it is "swapping an identity"
+- `4`/`5` are **product-line identifier values** (which value maps to which product line is OEM-internal, not publicly documented). A wrong value makes the EC "believe it is a different product" — every product-line-dispatched feature table can take a wrong branch. This is not "tuning a parameter"; it is "swapping an identity"
 - The tuxedo-drivers maintainer's reply on [issue #392](https://gitlab.com/tuxedocomputers/development/packages/tuxedo-drivers/-/work_items/392), verbatim: "ROMID is a magic value set by the OEM and manipulating it will open untested codepaths. I can't tell you if it has negative effects or not." — upstream explicitly declines this route
 - **~2020-era models: absolutely do not use.** Kernel CVE-2026-64143 documents that enabling the charge limit on those machines can **permanently damage the battery** — upstream sealed off even the `force` override. Your machine's generation is the first gate of whether this is safe at all
 

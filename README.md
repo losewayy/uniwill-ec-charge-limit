@@ -60,7 +60,7 @@ store_limit();
 写 `xram[0x0770] = 0x04`。**仅限 ROMID[0] 出厂为 `0xFF` 空槽的机器**（脚本会自动拒绝写已编程 ROMID）。
 
 - ✅ 蛟龙16Pro（ROMID=`0xFF`）上验证可用
-- ⚠️ **已知副作用**：游戏本上写 `4`（轻薄本产品线值）可能触发 Fn/键盘映射错乱——写 `5`（游戏本产品线值）在部分机型上正常。**ROMID 是产品身份证，写错值会让 EC 走错产品表分支**
+- ⚠️ **副作用面**：`state_is()` 在固件中被多处引用（不限于限充门控），写错产品线值可能影响其他按产品线分发的功能。**ROMID 是产品身份证，写错值会让 EC 走错产品表分支**
 - ❌ ROMID 已编程的机器**不要碰这条路**
 
 #### 老机型警告（重要）
@@ -110,7 +110,7 @@ pin_limit.exe --off
 **请把本项目当作逆向分析报告，而非可直接投入使用的工具。**
 
 - 本仓库**仅在蛟龙16Pro 2025（EC 1.32 / N.1.21MRO34）上实机验证**——其他机型 EC 固件是独立 build，门控常数、副作用、甚至有效性都**不能保证通用**
-- 门控里 `4`/`5` 是**产品线枚举**（4=轻薄本线、5=游戏本线），写错值等于让 EC "以为自己是别的产品"——键盘映射、功耗表、风扇策略都可能走错分支。这不是"调个参数"，是"换一个身份"
+- 门控判据 `4`/`5` 是**产品线标识值**（具体每个值对应哪条产品线属 OEM 内部约定，无公开文档）。写错值等于让 EC "以为自己是别的产品"——所有按产品线分发的功能表都可能走错分支。这不是"调个参数"，是"换一个身份"
 - tuxedo-drivers maintainer Werner Sembach 在 [issue #392](https://gitlab.com/tuxedocomputers/development/packages/tuxedo-drivers/-/work_items/392) 里的答复原话："ROMID is a magic value set by the OEM and manipulating it will open untested codepaths. I can't tell you if it has negative effects or not."——上游明确不会碰这条路
 - **老机型（~2020 代）绝对不要用**：Linux 内核 CVE-2026-64143 记载这些机型上启用充电限制会**永久损坏电池**——上游宁可封死 `force` 强开也不放行。你机器是哪一年代的，决定了"能不能玩"这道题的第一道关
 

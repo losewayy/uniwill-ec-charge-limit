@@ -7,31 +7,28 @@ The EC firmware only runs the charge-limit control loop when
     xram[0x07C3] == 4/5  OR  xram[0x0770] == 4/5   (state_is(), per w568w RE).
 Machines where neither holds (e.g. ROMID[0]=0xFF unprogrammed and
 platform=7) never enforce the live limit in xram[0x07B9].
-NOTE: the {4,5} set is per-firmware - on JIAOLONG EC 1.32 and yaoshi16,
-0x07C3 accepts 4 ONLY; on yaoshi16, native romid=5 does NOT open the gate.
+NOTE: the {4,5} set is per-firmware - on the reference unit (JIAOLONG
+EC 1.32), 0x07C3 accepts 4 ONLY (writing 5 did not open the gate).
 
 TWO gate operands exist -- "two keys for the same door":
 
   --key romid     poke xram[0x0770] (ROMID[0], product-line id).
                   Safe only when the byte is 0xFF (unprogrammed);
                   refusing to overwrite a real ROMID is enforced.
-                  FIELD DATA: on gaming models val=4 loaded thin-laptop
-                  tables and broke Fn keys; val=5 selects the gaming
-                  product line and fixed them.
+                  WARNING: ROMID is product identity - a wrong value
+                  makes the EC take wrong product-table branches and
+                  may affect unrelated features.
   --key platform  poke xram[0x07C3] (platform byte). Same gate, but it
                   may NOT feed product-line tables - if that holds, this
                   opens the gate WITHOUT swapping product identity.
                   Original value is saved to pin_limit_state.json and
                   restored by --off (or any reboot: xram is volatile).
-                  FIELD DATA: on JIAOLONG EC 1.32 AND yaoshi16, this byte
-                  accepts val=4 ONLY (val=5 wrote fine but gate stayed
-                  shut). On yaoshi16, platform=4 still caused partial Fn
-                  breakage - milder than romid=4, but present.
+                  VERIFIED on JIAOLONG EC 1.32: val=4 opens the gate,
+                  val=5 does not; no side effects observed there.
 
-Field report (2026-09): some machines fail to enforce even with
-romid=5. Before poking anything, run --dump and send the output -
-it separates "write didn't stick" / "gate didn't open" /
-"gate open but limit source differs".
+Before poking anything, run --dump - its output separates the three
+failure modes: "write didn't stick" / "gate didn't open" /
+"gate open but the limit source differs".
 
   pin_limit.exe                          # bare run = read-only dump (safe)
   pin_limit.exe --watch 10               # pin platform=4 + limit 60%, re-assert
